@@ -35,7 +35,8 @@ library(tseries)
 pick_div_type_shiny <- function(stock_names,
                                 bbcon,
                                 start_date,
-                                end_date){
+                                end_date,
+                                div_types){
   
   # To create selection list, the whole download process should 
   # be done, so here also the final dividend dataframe is created
@@ -61,27 +62,38 @@ pick_div_type_shiny <- function(stock_names,
   # Take into accound time window
   div_data_df <- div_data_df[div_data_df$`Ex-Date` >= start_date &
                                div_data_df$`Ex-Date` <= end_date, ]
-  # reset index
-  rownames(div_data_df) <- NULL
+  # Dividend type filter
+  div_data_df <- div_data_df[div_data_df$`Dividend Type` %in% div_types, ]
   
-  available_div_types <- unique(div_data_df$`Dividend Type`)
-  
-  num_of_div_types <- length(available_div_types)
-  
-  if(num_of_div_types == 0){
-    message("There were no dividends during selected period. Further research does not have any sense with these input parameters")
+  if(nrow(div_data_df) > 0){
+    # reset index
+    rownames(div_data_df) <- NULL
+    
+    available_div_types <- unique(div_data_df$`Dividend Type`)
+    
+    num_of_div_types <- length(available_div_types)
+    
+    if (num_of_div_types == 0) {
+    stop(
+    "There were no dividends of selected type during selected period. Further research does not have any sense with these input parameters"
+    )
     
     return(NULL)
-  }
-  else{
+    }
+    else{
     # there were dividends. The research makes sense
     
     
     return_list <- list(div_types = available_div_types,
-                        div_data_df = div_data_df)
+    div_data_df = div_data_df)
     
     return(return_list)
+    }
   }
+  else{
+    stop("There were no dividends of selected type during selected period. Further research does not have any sense with these input parameters")
+  }
+
 }
 
 set_date_index <- function(df){
@@ -141,8 +153,12 @@ download_data_shiny <- function(index_name,
                                 start_date,
                                 end_date,
                                 stocks,
+                                div_types,
                                 periodicity = "DAILY") {
   
+  if(is.null(div_types) == TRUE){
+    stop("No dividend types are selected")
+  }
 
   if(is.null(stocks) == TRUE){
     stop("No stocks are selected")
@@ -160,6 +176,13 @@ download_data_shiny <- function(index_name,
   }
   else{
       # Nothing already correct
+  }
+  
+  if(div_types == 'ALL'){
+    div_types <- c("Regular Cash", "Return of Capital", "Spinoff")
+  }
+  else{
+    # Nothing already correct
   }
   
   opt <- c("periodicitySelection" = periodicity)
@@ -218,7 +241,8 @@ download_data_shiny <- function(index_name,
   div_data_l <- pick_div_type_shiny(stock_names = stocks,
                                     bbcon = bbcon,
                                     start_date = start_date,
-                                    end_date = end_date)
+                                    end_date = end_date,
+                                    div_types = div_types)
 
   return_list <- list(index_price = index_price,
                       index_return = index_total_returns_xts,
@@ -320,6 +344,7 @@ get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, ExDiv_dates, period){
   l <- list()
   j = 1
   
+  original_stocks_names <- ExDiv_dates$`Stock Name`
   not_valid_stocks <- c()
   
   # List with abn. ret. for each div.date
@@ -344,13 +369,20 @@ get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, ExDiv_dates, period){
     }
     else{
       message("\n", stock_name, " returns contain NA, the stock is not used")
-      not_valid_stocks <- c(not_valid_stocks, stock_name)
+      not_valid_stocks <- c(not_valid_stocks, i)
     }
   }
   
   # Unite in one data frame all single stock's abn. ret.
   df <- data.frame(l)
-  valid_stock_names <- ExDiv_dates$`Stock Name`[!(ExDiv_dates$`Stock Name` %in% not_valid_stocks)]
+  
+  if(length(not_valid_stocks) > 0){
+    valid_stock_names <- original_stocks_names[-not_valid_stocks]  
+  }
+  else{
+    valid_stock_names <- original_stocks_names
+  }
+  
   colnames(df) <- valid_stock_names
   
   return(df)
@@ -377,17 +409,16 @@ execute_ttest0 <- function(analized_df){
     
     tryCatch(
       {
-      pvalue_jbt <- jarque.bera.test(x = unlist(analized_df[i, ]))[3]
-      if(pvalue_jbt < 0.05){
-        message("the normality assumption in t-test is violated")
-      }
+        pvalue_jbt <- jarque.bera.test(x = unlist(analized_df[i, ]))[3]
+        if(pvalue_jbt < 0.05){
+          message("the normality assumption in t-test is violated")
+        }
         ttest_res <- t.test(unlist(analized_df[i, ]), mu = 0)
       },
       error = function(cond)
       {
         # show original error message
-        message("not enough observations for t.test")
-        message(cond)
+        stop("not enough observations for normality test and t.test")
       }
     )
     
@@ -603,7 +634,7 @@ ui <- fluidPage(
        selectInput("index_name", label = "Index Name:",
                    choices = c("SMI Index"), selected = "SMI Index"),
        
-       selectInput("stocksi", label = "Stocks to use:", multiple = TRUE,
+       selectInput("stocks", label = "Stocks to use:", multiple = TRUE,
                    choices = c("ALL", "ABBN SE Equity", "ADEN SE Equity",
                                "ALC SE Equity",  "CFR SE Equity",  "CSGN SE Equity",
                                "GEBN SE Equity", "GIVN SE Equity", "LHN SE Equity",
@@ -615,7 +646,7 @@ ui <- fluidPage(
        dateInput(inputId = "start_date", label = "Start Date:", value = "2018-01-01"),
        dateInput(inputId = "end_date", label = "End Date:"),
        
-       selectInput("div_type", label = "Dividend types to use:", multiple = TRUE,
+       selectInput("div_types", label = "Dividend types to use:", multiple = TRUE,
                    choices = c("ALL", "Regular Cash", "Return of Capital", "Spinoff"), selected = "ALL"),
        
        selectInput("sign_lvl", label = "Significant level to use:",
@@ -645,7 +676,8 @@ server <- function(input, output) {
   index_data <- reactive(download_data_shiny(index_name = input$index_name,
                                              start_date = as.Date(input$start_date),
                                              end_date = as.Date(input$end_date),
-                                             stocks = input$stocksi))
+                                             stocks = input$stocks,
+                                             div_types = input$div_types))
   
   abnormal_returns <- reactive(calc_abnorm_ret_all(stocks_returns_xts = index_data()$stocks_returns,
                                           index_returns_xts = index_data()$index_return))
