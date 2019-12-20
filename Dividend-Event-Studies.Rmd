@@ -42,6 +42,7 @@ pick_div_type_shiny <- function(stock_names,
   # be done, so here also the final dividend dataframe is created
   
   # Get Ex Dividend date for all required stocks
+  
   div_data_l <- lapply(stock_names, get_exDiv_dates)
   
   # All data frames in a list have the same structure. Merge them all like rbind()
@@ -57,43 +58,43 @@ pick_div_type_shiny <- function(stock_names,
   # After the merge some columns with all NA can appear. Columns with NA should be deleted
   div_data_df <- div_data_df[, colSums(is.na(div_data_df)) == 0]
   
-  colnames(div_data_df) <- c("Ex-Date", "Dividend Type", "Stock Name")
+  colnames(div_data_df) <- c("Date", "Type", "Stock Name")
   
   # Take into accound time window
-  div_data_df <- div_data_df[div_data_df$`Ex-Date` >= start_date &
-                               div_data_df$`Ex-Date` <= end_date, ]
+  div_data_df <- div_data_df[div_data_df$`Date` >= start_date &
+                               div_data_df$`Date` <= end_date, ]
   # Dividend type filter
-  div_data_df <- div_data_df[div_data_df$`Dividend Type` %in% div_types, ]
+  div_data_df <- div_data_df[div_data_df$`Type` %in% div_types, ]
   
   if(nrow(div_data_df) > 0){
     # reset index
     rownames(div_data_df) <- NULL
     
-    available_div_types <- unique(div_data_df$`Dividend Type`)
+    available_div_types <- unique(div_data_df$`Type`)
     
     num_of_div_types <- length(available_div_types)
     
     if (num_of_div_types == 0) {
-    stop(
-    "There were no dividends of selected type during selected period. Further research does not have any sense with these input parameters"
-    )
-    
-    return(NULL)
+      stop(
+        "There were no dividends of selected type during selected period. Further research does not have any sense with these input parameters"
+      )
+      
+      return(NULL)
     }
     else{
-    # there were dividends. The research makes sense
-    
-    
-    return_list <- list(div_types = available_div_types,
-    div_data_df = div_data_df)
-    
-    return(return_list)
+      # there were dividends. The research makes sense
+      
+      
+      return_list <- list(div_types = available_div_types,
+                          div_data_df = div_data_df)
+      
+      return(return_list)
     }
   }
   else{
     stop("There were no dividends of selected type during selected period. Further research does not have any sense with these input parameters")
   }
-
+  
 }
 
 set_date_index <- function(df){
@@ -122,11 +123,128 @@ set_date_index <- function(df){
   )
 }
 
+define_reporting_type <- function(year_period_v){
+  
+  if(class(year_period_v) == "character"){
+    year_period_v <- ifelse(test = grepl(x = year_period_v, pattern = "A"), yes = "A" , no = year_period_v)
+    year_period_v <- ifelse(test = grepl(x = year_period_v, pattern = "Q"), yes = "Q" , no = year_period_v)
+    year_period_v <- ifelse(test = grepl(x = year_period_v, pattern = "S"), yes = "S" , no = year_period_v)
+    
+    return(year_period_v)
+  }
+  else{
+    stop("Reporting type mapping failed, since provided parameter is of wrong type")
+    return(NA)
+  }
+}
+
+get_reporting_dates <- function(stock_name){
+  
+  if(length(stock_name == 1)){
+    
+    stock_reporting_dates_info <- bds(security = stock_name,
+                                      field = "EARN_ANN_DT_TIME_HIST_WITH_EPS")
+    
+    if(is.null(stock_reporting_dates_info) == FALSE){
+      
+      if(sum(colnames(stock_reporting_dates_info) %in% c("Announcement Date", "Year/Period")) == 2 ){
+        # Get data frame with 2 columns Ex-Date and Dividend Type column
+        stock_reporting_date_df <- stock_reporting_dates_info[ , c("Announcement Date", "Year/Period"), drop = FALSE]
+        
+        # Finaly, 3 date, type and stock name is required
+        stock_reporting_date_df$stock_name <- stock_name
+        
+        # Only type of reporting date should be stored
+        stock_reporting_date_df$`Year/Period` <- define_reporting_type(stock_reporting_date_df$`Year/Period`)
+        
+        # Dates with missing data should not be used
+        stock_reporting_date_df <- na.omit(stock_reporting_date_df)
+        
+        colnames(stock_reporting_date_df) <- c("Announcement Date", "Reporting Type", "Stock Name")
+        
+        # time-series is impossible to use because of date duplicates
+        return(stock_reporting_date_df)  
+      }
+      else{
+        stop("Column names used in get_reporting_dates are not correct")
+        return(NA)
+      }
+    }
+    else{
+      # data frame is empty
+      message(stock_name, " has not had any reporting yet")
+      return(NA)
+    }
+  }
+  else{
+    stop("Error in stock reporting dates acquisition. Stock name parameter must contain only 1 value.")
+    return(NA)  
+  }
+}
+
+pick_reporting_dates <- function(stock_names,
+                                bbcon,
+                                start_date,
+                                end_date,
+                                reporting_types){
+  
+  if(length(stock_names) >= 1){
+    
+    # Get reporting dates info for all stocks
+    reporting_data_l <- lapply(stock_names, get_reporting_dates)
+    
+    # All data frames in a list have the same structure. Merge them all like rbind()
+    if(length(reporting_data_l) > 1){
+      # The function works only with several objects
+      reporting_data_df <- merge_recurse(reporting_data_l)  
+    }
+    else{
+      reporting_data_df <- as.data.frame(reporting_data_l)
+    }
+    
+    
+    # After the merge some columns with all NA can appear. Columns with NA should be deleted
+    reporting_data_df <- reporting_data_df[, colSums(is.na(reporting_data_df)) == 0]
+    
+    colnames(reporting_data_df) <- c("Date", "Type", "Stock Name")
+    
+    # Take into accound time window
+    reporting_data_df <- reporting_data_df[reporting_data_df$`Date` >= start_date &
+                                             reporting_data_df$`Date` <= end_date, ]
+    # Dividend type filter
+    reporting_data_df <- reporting_data_df[reporting_data_df$`Type` %in% reporting_types, ]
+    
+    if(nrow(reporting_data_df) > 0){
+      # reset index
+      rownames(reporting_data_df) <- NULL
+      
+      available_reporting_types <- unique(reporting_data_df$`Type`)
+      
+      num_of_reporting_types <- length(available_reporting_types)
+    
+      return_list <- list(reporting_types = available_reporting_types,
+                          reporting_data_df = reporting_data_df)
+      
+      return(return_list)
+    }
+    else{
+      stop("There were no reporting dates  of selected type during selected period. Further research does not have any sense with these input parameters")
+    }
+  }
+  else{
+    stop("no stocks provided")
+  }
+}
+
 get_exDiv_dates <- function(stock_name){
   
   # bds funtion with param. DVD_HIST_ALL gets from Bloomberg
   # all dividend-relevant information. Output is a data frame
   # Assumptions: stock_name contains only 1 value
+  if(length(stock_name) != 1){
+    stop("Error in stock dividend dates acquisition. Stock name parameter must contain only 1 value.")
+  }
+  
   stock_div_info <- bds(security = stock_name,
                         field = "DVD_HIST_ALL")
   if(is.null(stock_div_info) == FALSE){
@@ -154,36 +272,46 @@ download_data_shiny <- function(index_name,
                                 end_date,
                                 stocks,
                                 div_types,
-                                periodicity = "DAILY") {
+                                periodicity = "DAILY",
+                                reporting_types) {
   
+  # Dividend Type Input
   if(is.null(div_types) == TRUE){
     stop("No dividend types are selected")
   }
-
+  else if(div_types == 'ALL'){
+    div_types <- c("Regular Cash", "Return of Capital", "Spinoff")
+  }
+  else{} # Nothing already correct
+  
+  # Reporting Type Input
+  if(is.null(reporting_types) == TRUE){
+    message("No reporting types are selected; annual, semi-annual and quarter are used")
+    reporting_types <-  c("A", "S", "Q")
+  }else if (reporting_types == 'ALL'){
+      reporting_types <- c("A", "S", "Q")
+  }else{} # Nothing already correct
+  
+  
+  # Stock Names Input
   if(is.null(stocks) == TRUE){
     stop("No stocks are selected")
   }
-  
-  if(stocks == 'ALL'){
+  else if(stocks == 'ALL'){
     
     stocks <- c("ABBN SE Equity", "ADEN SE Equity",
-                      "ALC SE Equity",  "CFR SE Equity",  "CSGN SE Equity",
-                      "GEBN SE Equity", "GIVN SE Equity", "LHN SE Equity",
-                      "LONN SE Equity", "NESN SE Equity", "NOVN SE Equity",
-                      "ROG SE Equity",  "SCMN SE Equity", "SGSN SE Equity",
-                      "SIKA SE Equity", "SLHN SE Equity", "SREN SE Equity", 
-                      "UBSG SE Equity", "UHR SE Equity",  "ZURN SE Equity")
+                "ALC SE Equity",  "CFR SE Equity",  "CSGN SE Equity",
+                "GEBN SE Equity", "GIVN SE Equity", "LHN SE Equity",
+                "LONN SE Equity", "NESN SE Equity", "NOVN SE Equity",
+                "ROG SE Equity",  "SCMN SE Equity", "SGSN SE Equity",
+                "SIKA SE Equity", "SLHN SE Equity", "SREN SE Equity", 
+                "UBSG SE Equity", "UHR SE Equity",  "ZURN SE Equity")
   }
-  else{
-      # Nothing already correct
-  }
+  else{} # Nothing already correct
   
-  if(div_types == 'ALL'){
-    div_types <- c("Regular Cash", "Return of Capital", "Spinoff")
-  }
-  else{
-    # Nothing already correct
-  }
+
+  
+  
   
   opt <- c("periodicitySelection" = periodicity)
   
@@ -202,7 +330,7 @@ download_data_shiny <- function(index_name,
   # Convert to time-series object
   index_price_xts <- set_date_index(df = index_price)
   colnames(index_price_xts) <- index_name
-
+  
   # Get prices for all the index constituents from Bloomberg
   # Here stock_returns is a list of data frames
   stocks_prices_l <- bdh(securities = stocks,
@@ -210,45 +338,52 @@ download_data_shiny <- function(index_name,
                          start.date = start_date,
                          end.date = end_date,
                          options = opt)
-
+  
   # To work efficiently one common time-series object (xts) should be created
   # Step 1: for each df set date index and create a time-series object
   if(class(stocks_prices_l) == "data.frame"){
     # In this case stocks_prices_l is a single data frame (like with index)
     stocks_prices_xts <- set_date_index(df = stocks_prices_l)
     colnames(stocks_prices_xts) <- stocks
-
+    
   }else{
     stocks_prices_l <- lapply(X = stocks_prices_l, FUN = set_date_index)
-      # API reschuffles names of stocks
-      reordered_names <- names(stocks_prices_l)
-      
-      # Step 2: Unite time-series creating one xts object and set stocks' names
-      stocks_prices_xts <- do.call(what = merge, args = stocks_prices_l)
-      colnames(stocks_prices_xts) <- reordered_names
+    # API reschuffles names of stocks
+    reordered_names <- names(stocks_prices_l)
+    
+    # Step 2: Unite time-series creating one xts object and set stocks' names
+    stocks_prices_xts <- do.call(what = merge, args = stocks_prices_l)
+    colnames(stocks_prices_xts) <- reordered_names
   }
   
-
+  
   
   # Calculate index total simple returns
   index_total_returns_xts <- Return.calculate(prices = index_price_xts,
                                               method = "discrete")
-
+  
   # Calculate index constituencies' total simple returns: (p_new - p_old)/p_old
   stocks_total_returns_xts <- Return.calculate(prices = stocks_prices_xts,
                                                method = "discrete")
-
+  
   div_data_l <- pick_div_type_shiny(stock_names = stocks,
                                     bbcon = bbcon,
                                     start_date = start_date,
                                     end_date = end_date,
                                     div_types = div_types)
-
+  
+  reporting_data_l <- pick_reporting_dates(stock_names = stocks,
+                                           bbcon = bbcon,
+                                           start_date = start_date,
+                                           end_date = end_date,
+                                           reporting_types = reporting_types)
+  
   return_list <- list(index_price = index_price,
                       index_return = index_total_returns_xts,
                       stocks_prices = stocks_prices_xts,
                       stocks_returns = stocks_total_returns_xts,
-                      div_data_df = div_data_l$div_data_df
+                      div_data_df = div_data_l$div_data_df,
+                      reporting_data_df = reporting_data_l$reporting_data_df
   )
   
   return(return_list)
@@ -292,13 +427,13 @@ calc_abnorm_ret_all <- function(stocks_returns_xts, index_returns_xts){
 }
 
 # The function calculates a stock abnormal returns around ExDiv date
-get_stock_abn_ret_window <- function(one_ExDiv_date, abnorm_ret_stock_xts, period){
+get_stock_abn_ret_window <- function(single_date, abnorm_ret_stock_xts, period){
   
-  # one_ExDiv_date is supposed to be a data frame (checked earlier)
+  # single_date is supposed to be a data frame (checked earlier)
   # abnormal_ret_all_xts is time-series object (checked earlier)
   
   # get row with ExDiv date
-  t0_ind <- which(index(abnorm_ret_stock_xts) == one_ExDiv_date)
+  t0_ind <- which(index(abnorm_ret_stock_xts) == single_date)
   
   start_date_ind <- t0_ind - period
   end_date_ind <- t0_ind + period
@@ -313,7 +448,7 @@ get_stock_abn_ret_window <- function(one_ExDiv_date, abnorm_ret_stock_xts, perio
     
     # Subset required period
     analyzed_window <-
-    window(abnorm_ret_stock_xts, start = start_date, end = end_date)
+      window(abnorm_ret_stock_xts, start = start_date, end = end_date)
     
     # Create an output data frame object. we need to later bind dfs
     # with different dates
@@ -322,12 +457,12 @@ get_stock_abn_ret_window <- function(one_ExDiv_date, abnorm_ret_stock_xts, perio
     return(stock_window_abn_ret_df)
   }
   
- 
+  
 }
 
 # The function calculates abn. ret. around all ExDiv dates
 # and unites results in a common data frame
-get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, ExDiv_dates, period){
+get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, Event_dates, period){
   
   # abnorm_ret_all_xts is supposed to be xts (time-series)
   # if there is no any class = "xts" the object is of wrong type (xts object is "xts" and "zoo" )
@@ -336,7 +471,7 @@ get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, ExDiv_dates, period){
   }
   
   # we need a vector to apply "sapply"
-  if(class(ExDiv_dates) != "data.frame"){
+  if(class(Event_dates) != "data.frame"){
     stop("Divident dates is not in data.frame format")
   }
   
@@ -344,17 +479,17 @@ get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, ExDiv_dates, period){
   l <- list()
   j = 1
   
-  original_stocks_names <- ExDiv_dates$`Stock Name`
+  original_stocks_names <- Event_dates$`Stock Name`
   not_valid_stocks <- c()
   
   # List with abn. ret. for each div.date
-  for(i in 1:nrow(ExDiv_dates)){
+  for(i in 1:nrow(Event_dates)){
     
     # pick ExDiv date
-    one_ExDiv_date <- ExDiv_dates$`Ex-Date`[i]
+    single_date <- Event_dates$Date[i]
     
     # pick the corresponding stock
-    stock_name <- ExDiv_dates$`Stock Name`[i]
+    stock_name <- Event_dates$`Stock Name`[i]
     
     # get abnormal returns for picked stock
     abnorm_ret_stock_xts <- abnorm_ret_all_xts[ ,stock_name, drop = FALSE]
@@ -362,10 +497,10 @@ get_stocks_abn_ret_window <- function(abnorm_ret_all_xts, ExDiv_dates, period){
     # stocks with NA returns should not be used
     if(sum(is.na(abnorm_ret_stock_xts)) == 0){
       
-      l[j] <- get_stock_abn_ret_window(one_ExDiv_date = one_ExDiv_date,
+      l[j] <- get_stock_abn_ret_window(single_date = single_date,
                                        abnorm_ret_stock_xts = abnorm_ret_stock_xts,
                                        period = period)
-      j <- j+1
+      j <- j + 1
     }
     else{
       message("\n", stock_name, " returns contain NA, the stock is not used")
@@ -595,25 +730,25 @@ plot_with_signif_indication <- function(values, pvalues, title, sign_lvl, rw_fla
 }
 
 visualize_analysis_results <- function(analysis_results_l, sign_lvl){
-
-
+  
+  
   abn_ret <- plot_with_signif_indication(values = analysis_results_l$abn_ret_l$average_returns_daily,
-                              pvalues = analysis_results_l$abn_ret_l$pvalues,
-                              title = "Average daily abnormal returns",
-                              sign_lvl = sign_lvl,
-                              rw_flag = FALSE)
+                                         pvalues = analysis_results_l$abn_ret_l$pvalues,
+                                         title = "Average daily abnormal returns",
+                                         sign_lvl = sign_lvl,
+                                         rw_flag = FALSE)
   
   cumsum <- plot_with_signif_indication(values = analysis_results_l$cumsum_l$avg_cum_day_ret,
-                              pvalues = analysis_results_l$cumsum_l$pvalues,
-                              title = "Average cumulative sums by day (including the last day)",
-                              sign_lvl = sign_lvl,
-                              rw_flag = FALSE)
+                                        pvalues = analysis_results_l$cumsum_l$pvalues,
+                                        title = "Average cumulative sums by day (including the last day)",
+                                        sign_lvl = sign_lvl,
+                                        rw_flag = FALSE)
   
   roll_wind <- plot_with_signif_indication(values = analysis_results_l$roll_wind_l$avg_window_cumsum,
-                              pvalues = analysis_results_l$roll_wind_l$pvalues,
-                              title = "Average rolling window cumulative sums",
-                              sign_lvl = sign_lvl,
-                              rw_flag = TRUE)
+                                           pvalues = analysis_results_l$roll_wind_l$pvalues,
+                                           title = "Average rolling window cumulative sums",
+                                           sign_lvl = sign_lvl,
+                                           rw_flag = TRUE)
   
   return_list <- list(plot_abn_ret = abn_ret,
                       plot_cumsum = cumsum,
@@ -622,54 +757,85 @@ visualize_analysis_results <- function(analysis_results_l, sign_lvl){
   
 }
 
+input_valudation_check <- function(index_name,
+                                   start_date,
+                                   end_date,
+                                   stocks,
+                                   div_types,
+                                   reporting_types){
+  # Check if input is empty
+  req(index_name)
+  req(start_date)
+  req(end_date)
+  req(stocks)
+  req(div_types)
+  req(reporting_types)
+  
+  return(NULL)
+}
+
 # Define UI for application that draws a histogram
 ui <- fluidPage(
-   
-   # Application title
-   titlePanel(title = "Divident Event Study", windowTitle = "Divident Event Study"),
-   
-   sidebarLayout(
-     sidebarPanel(
-       
-       selectInput("index_name", label = "Index Name:",
-                   choices = c("SMI Index"), selected = "SMI Index"),
-       
-       selectInput("stocks", label = "Stocks to use:", multiple = TRUE,
-                   choices = c("ALL", "ABBN SE Equity", "ADEN SE Equity",
-                               "ALC SE Equity",  "CFR SE Equity",  "CSGN SE Equity",
-                               "GEBN SE Equity", "GIVN SE Equity", "LHN SE Equity",
-                               "LONN SE Equity", "NESN SE Equity", "NOVN SE Equity",
-                               "ROG SE Equity",  "SCMN SE Equity", "SGSN SE Equity",
-                               "SIKA SE Equity", "SLHN SE Equity", "SREN SE Equity", 
-                               "UBSG SE Equity", "UHR SE Equity",  "ZURN SE Equity"), selected = "ALL"),
-       
-       dateInput(inputId = "start_date", label = "Start Date:", value = "2018-01-01"),
-       dateInput(inputId = "end_date", label = "End Date:"),
-       
-       selectInput("div_types", label = "Dividend types to use:", multiple = TRUE,
-                   choices = c("ALL", "Regular Cash", "Return of Capital", "Spinoff"), selected = "ALL"),
-       
-       selectInput("sign_lvl", label = "Significant level to use:",
-                   choices = c(0.05, 0.1)),
-       
-       sliderInput("period_size", label = "Period Size:",
-                   min = 1, max = 50, value = 20, step = 1),
-       
-       sliderInput("roll_window_size", label = "Rolling-window Size:",
-                   min = 1, max = 50, value = 10, step = 1)
-       
-     ),
-      mainPanel(
-         # dataTableOutput(outputId = "view"),
-         plotOutput(outputId = "plot_abn_ret"),
-         plotOutput(outputId = "plot_cumsum"),
-         plotOutput(outputId = "plot_roll_wind")
-      )
-   )
+  
+  # Application title
+  titlePanel(title = "Event Study Report", windowTitle = "Event Study Report"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      
+      selectInput("index_name", label = "Index Name:",
+                  choices = c("SMI Index"), selected = "SMI Index"),
+      
+      selectInput("stocks", label = "Stocks to use:", multiple = TRUE,
+                  choices = c("ALL", "ABBN SE Equity", "ADEN SE Equity",
+                              "ALC SE Equity",  "CFR SE Equity",  "CSGN SE Equity",
+                              "GEBN SE Equity", "GIVN SE Equity", "LHN SE Equity",
+                              "LONN SE Equity", "NESN SE Equity", "NOVN SE Equity",
+                              "ROG SE Equity",  "SCMN SE Equity", "SGSN SE Equity",
+                              "SIKA SE Equity", "SLHN SE Equity", "SREN SE Equity", 
+                              "UBSG SE Equity", "UHR SE Equity",  "ZURN SE Equity"), selected = "ALL"),
+      
+      dateInput(inputId = "start_date", label = "Start Date:", value = "2018-01-01"),
+      dateInput(inputId = "end_date", label = "End Date:"),
+      
+      selectInput("div_types", label = "Dividend types to use:", multiple = TRUE,
+                  choices = c("ALL", "Regular Cash", "Return of Capital", "Spinoff"), selected = "ALL"),
+      
+      selectInput("reporting_types", label = "Reporting types to use:", multiple = TRUE,
+                  choices = c("ALL", "A", "S", "Q"), selected = "ALL"),
+      
+      radioButtons("event_type", h3("Event Type"),
+                   choices = list("Dividend" = "Dividend", "Report" = "Report"), selected = "Report"),
+      
+      selectInput("sign_lvl", label = "Significant level to use:",
+                  choices = c(0.05, 0.1)),
+      
+      sliderInput("period_size", label = "Period Size:",
+                  min = 1, max = 50, value = 20, step = 1),
+      
+      sliderInput("roll_window_size", label = "Rolling-window Size:",
+                  min = 1, max = 50, value = 10, step = 1)
+      
+    ),
+    mainPanel(
+      # dataTableOutput(outputId = "view"),
+      plotOutput(outputId = "plot_abn_ret"),
+      plotOutput(outputId = "plot_cumsum"),
+      plotOutput(outputId = "plot_roll_wind")
+    )
+  )
 )
 
 # Define server logic required to draw a histogram
 server <- function(input, output) {
+  
+  # Currently only empty input is prevented
+  # reactive(input_valudation_check(index_name = input$index_name,
+  #                       start_date = as.Date(input$start_date),
+  #                       end_date = as.Date(input$end_date),
+  #                       stocks = input$stocks,
+  #                       div_types = input$div_types,
+  #                       reporting_types = input$reporting_types))
   
   
   # The data depends on input parameters
@@ -677,15 +843,36 @@ server <- function(input, output) {
                                              start_date = as.Date(input$start_date),
                                              end_date = as.Date(input$end_date),
                                              stocks = input$stocks,
-                                             div_types = input$div_types))
+                                             div_types = input$div_types,
+                                             reporting_types = input$reporting_types))
   
   abnormal_returns <- reactive(calc_abnorm_ret_all(stocks_returns_xts = index_data()$stocks_returns,
-                                          index_returns_xts = index_data()$index_return))
+                                                   index_returns_xts = index_data()$index_return))
   
-  # Contains abnormal returns for all stocks and all period days
-  window_abn_ret_df <- reactive(get_stocks_abn_ret_window(abnorm_ret_all_xts = abnormal_returns(),
-                                                          ExDiv_dates = index_data()$div_data_df,
-                                                          period = input$period_size))
+  state <- reactiveValues()
+  
+  observe({
+    if(input$event_type == 'Dividend'){
+      
+      state$event_dates <- index_data()$div_data_df
+    }
+    else if(input$event_type == 'Report'){
+      state$event_dates <- index_data()$reporting_data_df
+    }
+    else if(is.null(input$event_type) == TRUE){
+      stop("Event type is not defined")
+    }
+    else{
+      stop("Event type is not valid")
+    }
+  })
+
+    # Contains abnormal returns for all stocks and all period days
+    window_abn_ret_df <- reactive(get_stocks_abn_ret_window(abnorm_ret_all_xts = abnormal_returns(),
+                                                            Event_dates = state$event_dates,#index_data()$reporting_data_df,
+                                                            period = input$period_size))
+
+
   
   analysis_results_l <- reactive(analyze_period(window_abn_ret_df(), rollwind_size = input$roll_window_size))
   
